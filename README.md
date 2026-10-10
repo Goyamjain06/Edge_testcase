@@ -52,6 +52,15 @@ rider's voice (hi-IN) ─► Lambda ─► Strands agent ─► Amazon Nova (Bed
 - **Limits:** these are estimates from fixed monitors, not personal sensors. Speed (20 km/h) and road distance
   (1.3× straight line) are stated assumptions.
 
+## Setup
+
+1. Get a free OpenAQ API key from [explore.openaq.org](https://explore.openaq.org).
+2. Export it (see `.env.example`): `export OPENAQ_API_KEY=your_free_key_here`
+3. Deploy: `./deploy.sh`
+
+The key is only needed to rebuild the data or deploy. The app runs without it, using the real monitor data
+already in `data/delhi_aq.json`.
+
 ## Run it
 
 ```bash
