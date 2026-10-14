@@ -1,92 +1,69 @@
-# RideClean: smog dose for delivery riders
-
-**Team Edge_testcase, Environmental Hacks (Bharat Builds Tour, WeMakeDevs x AWS), Air track.**
-
-Delhi's delivery riders spend 8 to 10 hours a day on two-wheelers in the worst air in the world. They breathe
-more smoke than the nearest monitor shows, nobody tells them how much, and nobody plans shifts around it.
-Amazon already pulls riders off the road from 1 to 4 pm during heatwaves. Smog has no such rule.
-
-RideClean turns government monitor data into two things:
-
-- **Rider app (Hindi, voice-first).** A rider says *"आनंद विहार से नोएडा सेक्टर 62 जा रहा हूँ"* and hears back,
-  in Hindi, how much smoke the ride costs in cigarettes, whether leaving later would help, and the nearest
-  metro station to take a clean-air break. It also tracks the day's dose so far.
-- **Station planner.** The pollution version of the heat rule: the worst hours by zone, a roster view that moves
-  riders to cleaner shift times (and shows how much smoke that saves), and a ranked list of where new rest points
-  would cut the most exposure.
-
 ## How it's built on AWS
 
-| Piece | AWS |
+| Component | Technology |
 |---|---|
-| Hindi voice agent | **Strands Agents SDK** (AWS open source) with **Amazon Nova Pro** on **Amazon Bedrock** |
-| Spoken replies | **Amazon Polly**, neural Hindi voice (Kajal) |
-| API | **AWS Lambda** (Function URL), deployed with **AWS SAM** |
-| Rider trip log | **Amazon DynamoDB** |
-| Web app | **AWS Amplify Hosting** |
-| Air data | **OpenAQ archive on AWS Open Data** (`s3://openaq-data-archive`) + OpenAQ API for live readings |
+| AI agent architecture | Strands Agents SDK, designed for integration with Amazon Nova through Amazon Bedrock |
+| Hindi responses | Rule-based Hindi response templates as a fallback when Bedrock model access is unavailable |
+| Spoken replies | Amazon Polly, neural Hindi voice (Kajal) |
+| API | AWS Lambda (Function URL), deployed with AWS SAM |
+| Rider trip log | Amazon DynamoDB |
+| Web app | AWS Amplify Hosting |
+| Air-quality data | OpenAQ archive on AWS Open Data (`s3://openaq-data-archive`) and OpenAQ API for live readings |
 
-The agent never makes up numbers. Every figure comes from a tool backed by monitor data
-(`backend/src/saans/agent.py`). If Bedrock is unreachable, the same tools answer with Hindi templates, and if the
-whole backend is unreachable, the app answers on the phone with the same model, so a demo never dies.
+### AI integration and fallback behavior
 
-```
-rider's voice (hi-IN) ─► Lambda ─► Strands agent ─► Amazon Nova (Bedrock)
-                                        │  tools: ride_exposure, air_now, clean_break_spots,
-                                        │         best_time_here, my_shift_dose
-                                        ├─► OpenAQ live PM2.5 + season pattern (OpenAQ on AWS Open Data)
-                                        ├─► DynamoDB (trip log)
-                                        └─► Polly (Hindi audio) ─► rider hears the answer
-```
+RideClean is designed around a tool-based agent architecture, where responses rely on air-quality data and exposure calculations rather than invented figures.
 
-## The method (every number has a source)
+During the hackathon deployment, Amazon Bedrock model access encountered an error. Consequently, the application used a rule-based response engine with Hindi templates to provide responses using the available data and calculation tools.
 
-- **Air:** hourly PM2.5 from government monitors in Delhi NCR, Oct 15 to Dec 15 2025, from the OpenAQ archive
-  on AWS. `analysis/build_dataset.py` builds the hour-by-zone pattern, the worst hours, and the best shift times.
-- **On-road factor 1.3:** two-wheeler riders in Delhi breathe ~30% more PM2.5 than the nearby ambient monitor
-  (Goel et al., *Atmospheric Environment* 2015, on-road exposure study in Delhi).
-- **Cigarettes:** 22 µg/m³ of PM2.5 over 24 hours ≈ 1 cigarette (Berkeley Earth). Riders breathe harder than at
-  rest, so this is conservative.
-- **Break benefit:** enclosed AC spaces sit at about half the road level in the same Delhi study.
-- **Break spots:** metro stations from OpenStreetMap.
-- **Limits:** these are estimates from fixed monitors, not personal sensors. Speed (20 km/h) and road distance
-  (1.3× straight line) are stated assumptions.
+This fallback allowed the core pollution-exposure features to remain usable without a successful model response. The Strands Agents and Amazon Nova integration represents the intended AI architecture; model-generated responses should not be assumed to be active in the deployed demo.
 
-## Setup
+The application also includes frontend fallback behavior for situations where the backend is unavailable. This should be distinguished from the Bedrock fallback: the former concerns backend connectivity, while the latter concerns AI model access.
 
-1. Get a free OpenAQ API key from [explore.openaq.org](https://explore.openaq.org).
-2. Export it (see `.env.example`): `export OPENAQ_API_KEY=your_free_key_here`
-3. Deploy: `./deploy.sh`
+### Architecture
 
-The key is only needed to rebuild the data or deploy. The app runs without it, using the real monitor data
-already in `data/delhi_aq.json`.
-
-## Run it
-
-```bash
-# 1. Real data (no AWS account needed; free OpenAQ key from explore.openaq.org)
-pip install -r analysis/requirements.txt
-OPENAQ_API_KEY=xxxx python3 analysis/build_dataset.py
-
-# 2. Web app locally (works without the backend)
-cd app && npm install && npm run dev        # http://localhost:5173
-
-# 3. Everything on AWS (needs: brew install awscli aws-sam-cli node; aws configure)
-OPENAQ_API_KEY=xxxx ./deploy.sh
+```text
+Rider voice input (Hindi)
+        |
+        v
+AWS Lambda API
+        |
+        v
+Agent / response engine
+        |
+        +-- Intended integration:
+        |      Strands Agents + Amazon Bedrock / Nova
+        |
+        +-- Available fallback:
+        |      Rule-based Hindi response templates
+        |
+        +-- Exposure calculation and data tools
+        |      +-- OpenAQ live PM2.5 readings
+        |      +-- Historical seasonal pollution patterns
+        |      +-- Ride exposure estimates
+        |      +-- Cleaner break locations
+        |      +-- Best-time recommendations
+        |      +-- Daily trip dose
+        |
+        +-- Amazon DynamoDB (trip history)
+        |
+        v
+Amazon Polly (Hindi audio)
+        |
+        v
+Rider hears the response
 ```
 
-Test the agent from the terminal with your AWS login: `cd backend && pip install -r requirements.txt && python3 local.py "कब निकलूँ?"`.
-Backend tests: `cd backend && python3 -m pytest tests`.
+The diagram describes the system architecture and fallback paths; it does not imply that every integration was operational in the hackathon deployment.
 
-## Repo
+## Limitations and assumptions
 
-```
-analysis/   data pipeline (OpenAQ on AWS -> data/delhi_aq.json)
-backend/    Lambda: Strands agent, tools, fallback, Polly, DynamoDB, SAM template
-app/        React + TypeScript web app: /rider, /station, landing page
-deploy.sh   one-command deploy (SAM + Amplify)
-```
+- **Model availability:** Bedrock model access was unavailable during the hackathon deployment, so the deployed application relied on rule-based responses.
+- **Exposure estimates:** Calculations use fixed-monitor readings and stated assumptions rather than personal pollution sensors.
+- **On-road exposure:** A 1.3× factor is used as an estimate based on the cited Delhi on-road exposure study.
+- **Cigarette equivalence:** The comparison is an approximate communication aid, not a direct measurement of an individual's inhaled dose.
+- **Travel assumptions:** Speed (20 km/h) and road distance (1.3× straight-line distance) are modeling assumptions.
 
 ## AI tools used
 
-Built with help from Claude (Anthropic) for research, code and writing, as allowed by the tour rules.
+Claude (Anthropic) assisted with research, implementation and documentation, as permitted by the hackathon rules. The project distinguishes the intended model-based agent architecture from the rule-based fallback used when Bedrock model access was unavailable.
